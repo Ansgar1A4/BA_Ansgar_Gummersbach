@@ -116,6 +116,7 @@ RUN set -ex \
        mariadb \
        munge \
        numactl \
+       openssh-server \
        perl \
        procps-ng \
        psmisc \
@@ -127,7 +128,10 @@ RUN set -ex \
     && dnf clean all \
     && rm -rf /var/cache/dnf \
     && alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
-    && alternatives --set python3 /usr/bin/python3.12
+    && alternatives --set python3 /usr/bin/python3.12 \
+    && ssh-keygen -A \
+    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 
 # Install gosu for privilege dropping
 ARG GOSU_VERSION=1.19
