@@ -25,6 +25,8 @@ services:
       context: .
       args:
         SLURM_VERSION: ${SLURM_VERSION:-25.11.2}
+        GPU_ENABLE: ${GPU_ENABLE:-false}
+        CUDA_VERSION: ${CUDA_VERSION:-12.6}
       cache_from:
         - slurm-docker-cluster:${SLURM_VERSION:-25.11.2}
     command: ["slurmdbd"]
@@ -59,14 +61,15 @@ services:
     privileged: true
     working_dir: /data
     environment:
-      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-}
-      - SSH_ENABLE=${SSH_ENABLE:-false}
+      ELASTICSEARCH_HOST: ${ELASTICSEARCH_HOST:-}
+      GPU_COUNT: ${GPU_COUNT:-1}
+      SSH_ENABLE: ${SSH_ENABLE:-false}
     volumes:
       - etc_munge:/etc/munge:z
       - etc_slurm:/etc/slurm:z
       - slurm_jobdir:/data:z
       - var_log_slurm:/var/log/slurm:z
-      - ${SSH_AUTHORIZED_KEYS:-/dev/null}:/tmp/authorized_keys_host:ro,z      
+      - ${SSH_AUTHORIZED_KEYS:-/dev/null}:/tmp/authorized_keys_host:ro,z
     ports:
       - "${SSH_PORT:-3022}:22"
     expose:
@@ -154,6 +157,42 @@ services:
         condition: service_healthy
     networks:
       - slurm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pidof slurmd"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # GPU compute node (NVIDIA)
+  # Requires: GPU_ENABLE=true in .env and nvidia-container-toolkit on host
+  g1:
+    image: slurm-docker-cluster:${SLURM_VERSION:-25.11.2}
+    command: ["slurmd"]
+    container_name: g1
+    hostname: g1
+    working_dir: /data
+    privileged: true
+    profiles: ["gpu"]
+    volumes:
+      - etc_munge:/etc/munge
+      - etc_slurm:/etc/slurm
+      - slurm_jobdir:/data
+      - var_log_slurm:/var/log/slurm
+    expose:
+      - "6818"
+    depends_on:
+      slurmctld:
+        condition: service_healthy
+    networks:
+      - slurm-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu, compute, utility]
     healthcheck:
       test: ["CMD-SHELL", "pidof slurmd"]
       interval: 10s
