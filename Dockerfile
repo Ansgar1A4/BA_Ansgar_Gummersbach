@@ -76,6 +76,7 @@ RUN set -ex \
        openssl-devel \
        pam-devel \
        perl \
+       pmix-devel \
        python3.12 \
        python3.12-devel \
        readline-devel \
@@ -231,6 +232,8 @@ RUN set -ex \
        openssh-server \
        patch \
        perl \
+       pmix \
+       pmix-devel \
        procps-ng \
        psmisc \
        python3.12 \

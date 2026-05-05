@@ -25,3 +25,6 @@
 
 # Enable Lua for Plugins
 %_with_lua --with-lua=/usr
+
+# Enable PMIx support
+%_with_pmix --with-pmix=/usr
