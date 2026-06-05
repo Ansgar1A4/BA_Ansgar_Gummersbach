@@ -243,6 +243,12 @@ RUN set -ex \
        wget \
        xz \
        libjwt \
+       cmake \
+       elfutils-devel \
+       libpfm-devel \
+       lm_sensors-devel \
+       libbpf-devel \
+       audit-libs-devel \
     && dnf clean all \
     && rm -rf /var/cache/dnf \
     && alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \

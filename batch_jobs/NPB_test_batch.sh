@@ -1,6 +1,7 @@
 #!/bin/bash
-#SBATCH --nodes=1
-#SBATCH --ntasks=4
+#SBATCH --nodes=4
+#SBATCH --cpus-per-task=4
+#SBATCH --output=output%j.txt
 
 source /etc/profile.d/lmod.sh
 module load openmpi

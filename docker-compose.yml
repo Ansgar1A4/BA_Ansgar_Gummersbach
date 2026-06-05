@@ -74,6 +74,9 @@ services:
       - opt_modulefiles:/opt/modulefiles
       - spack_root:/opt/spack
       - ${SSH_AUTHORIZED_KEYS:-/dev/null}:/tmp/authorized_keys_host:ro,z
+      - usr_local_bin:/usr/local/bin
+      - lib64_libs:/lib64/
+      - ./plugins/lo2s-plugin:/opt/lo2s-plugin:z
     ports:
       - "${SSH_PORT:-3022}:22"
     expose:
@@ -131,6 +134,9 @@ services:
       - home_ood:/home/ood  # shared with OOD for job I/O
       - opt_modulefiles:/opt/modulefiles
       - spack_root:/opt/spack
+      - usr_local_bin:/usr/local/bin
+      - lib64_libs:/lib64/
+      - ./plugins/lo2s-plugin:/opt/lo2s-plugin
     expose:
       - "6818"
     depends_on:
@@ -165,6 +171,7 @@ services:
       - home_ood:/home/ood  # shared with OOD for job I/O
       - opt_modulefiles:/opt/modulefiles
       - spack_root:/opt/spack
+      - ./plugins/lo2s-plugin:/opt/lo2s-plugin
     expose:
       - "6818"
     depends_on:
@@ -275,6 +282,8 @@ volumes:
   home_ood:
   opt_modulefiles:
   spack_root:
+  usr_local_bin:
+  lib64_libs: 
   elasticsearch_data:
 
 networks:
