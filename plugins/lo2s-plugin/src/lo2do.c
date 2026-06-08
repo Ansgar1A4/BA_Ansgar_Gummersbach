@@ -9,8 +9,10 @@
 
 SPANK_PLUGIN(lo2do, 1);
 
-int start_adopter_process();
-int stop_adopter_process();
+//int start_adopter_factory_process();
+int init_adopter_process(int job_id);
+int stop_adopter_process(int job_id);
+
 
 //static int _opt_lo2do_enable_cb(int val, const char *optarg, int remote){}
 
@@ -26,9 +28,10 @@ int slurm_spank_init(spank_t sp, int ac, char **av)
         spank_option_register(sp, &spank_options[0]);
     }
     if (spank_context() == S_CTX_SLURMD) {
-        // Starting the adopter process in slurmd context, so it will be available for all jobs running on this node
-        start_adopter_process();
+        // Starting the adopter process for all other adopters in slurmd context, so it will be available for all jobs running on this node
+        // start_adopter_factory_process();
     }
+
     return 0;
 }
 
@@ -36,7 +39,7 @@ int slurm_spank_slurmd_exit(spank_t sp, int ac, char **av)
 {
     if (spank_context() == S_CTX_SLURMD) {
         // Stopping the adopter process when slurmd is exiting
-        stop_adopter_process();
+        // stop_adopter_process();
     }
     return 0;
 }
@@ -70,7 +73,7 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
         fprintf(log_file, "lo2do job epilog called in context: %d for job: %d, err: %s\n", spank_context(), job_id, spank_strerror(rc));
         fclose(log_file);
     } 
-    //stop_adopter_process();
+    //stop_adopter_process(job_id);
 
     return 0;
 }
@@ -133,27 +136,42 @@ int slurm_spank_local_user_init(spank_t sp, int ac, char **av)
 */
 
 
-int start_adopter_process() {
+int start_adopter_factory_process() {
     pid_t pid = fork();
 
     if (pid < 0) {
         perror("Fork for lo2s_adopter failed");
     } else if (pid == 0) {
 
-        char *args[] = {"lo2s_adopter", NULL};
+        char *args[] = {"lo2s_adopter_factory", NULL};
         
         if (execvp(args[0], args) < 0) {
-            perror("Exec for lo2s_adopter failed");
+            perror("Exec for lo2s_adopter_factory failed");
             exit(1);
         }
     }
 }
 
-int stop_adopter_process() {
-    char *args[] = {"lo2s_sender", "exit_lo2s", NULL};
+int init_adopter_process(int job_id) {
+    char job_id_str[16];
+    sprintf(job_id_str, "%d", job_id);
+    char *args[] = {"lo2s_adopter", job_id_str, NULL};
         
     if (execvp(args[0], args) < 0) {
-        perror("Exec for lo2s_sender failed");
+        perror("Exec for lo2s_adopter failed");
+        exit(1);
+    }
+    return 0;
+}
+
+int stop_adopter_process(int job_id) {
+    char job_id_str[16];
+    sprintf(job_id_str, "%d", job_id);
+
+    char *args[] = {"lo2s_sender", job_id_str, "exit_lo2s", NULL};
+        
+    if (execvp(args[0], args) < 0) {
+        perror("Exec for lo2s_adopter closing failed");
         exit(1);
     }
     

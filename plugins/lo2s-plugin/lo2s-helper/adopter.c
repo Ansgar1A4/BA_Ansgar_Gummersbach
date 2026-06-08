@@ -11,11 +11,24 @@
 #define FIFO_FILE "/tmp/adopter_pipe"
 #define BUFFER_SIZE 256
 
-int main() {
+int job_id = -1;
+
+int main(int argc, char *argv[]) {
+    char pipe_path[64];
+    snprintf(pipe_path, sizeof(pipe_path), "%s", FIFO_FILE);
+
+    if (argc == 2) {
+        job_id = atoi(argv[1]);
+        snprintf(pipe_path, sizeof(pipe_path), "%s%s", FIFO_FILE, argv[1]);
+    }else{
+        fprintf(stderr, "No job ID or too many arguments provided to adopter process, exiting.\n");
+        exit(1);
+    }
+
+
     char buffer[BUFFER_SIZE];
     int fifo_fd;
 
-    // Signal-Handling: Zombies direkt vom Kernel verhindern lassen
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sigemptyset(&sa.sa_mask); 
@@ -30,11 +43,11 @@ int main() {
     }
 
     // Named Pipe erstellen
-    mkfifo(FIFO_FILE, 0666);
+    mkfifo(pipe_path, 0666);
 
     while (1) {
         // Blockiert, bis ein Schreibprozess die Pipe öffnet
-        fifo_fd = open(FIFO_FILE, O_RDONLY);
+        fifo_fd = open(pipe_path, O_RDONLY);
         if (fifo_fd < 0) {
             perror("Fehler beim Öffnen der Pipe");
             exit(1);
@@ -57,7 +70,7 @@ int main() {
             if (strcmp(buffer, "exit_lo2s") == 0) {
                 printf("[Dauerdienst] Exit-Befehl erhalten. Fahre herunter...\n");
                 fclose(fifo_stream); // Schließt auch fifo_fd
-                unlink(FIFO_FILE);
+                unlink(pipe_path);
                 exit(0);
             }
 
@@ -68,11 +81,11 @@ int main() {
             } else if (pid == 0) {
                            // Im Kindprozess: Stream schließen
                 fclose(fifo_stream);
-                        
+
                 // Array für die Argumente vorbereiten (z.B. maximal 64 Argumente)
                 char *args[64]; 
                 int i = 0;
-                        
+
                 // Den Buffer an den Leerzeichen zerlegen
                 char *token = strtok(buffer, " ");
                 while (token != NULL && i < 63) {
