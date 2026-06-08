@@ -17,3 +17,6 @@ rm ./lo2do.so
 docker exec slurmctld scontrol reconfigure
 
 docker exec slurmctld bash -c 'scontrol update nodename=c[1-4] state=resume'
+
+
+docker compose up -d
