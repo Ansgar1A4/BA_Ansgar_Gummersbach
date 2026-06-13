@@ -101,6 +101,11 @@ int main(int argc, char *argv[]) {
                 // Jetzt übergibst du das dynamisch gefüllte Array an execvp
                 if (execvp(args[0], args) < 0) {
                     perror("Exec mit Argumenten fehlgeschlagen");
+                    for (int i = 0; i < argc; i++)
+                    {
+                        fprintf(stderr, "Arg%d: %s", i, args[i]);
+                    }
+                    perror("");
                     exit(1);
                 }
             }
