@@ -3,8 +3,6 @@
 
 #include <stddef.h>
 #include <string.h>
-#include <slurm/spank.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +29,7 @@ int main(int argc, char *argv[]) {
     snprintf(pipe_path, sizeof(pipe_path), "%s%d", FIFO_FILE, job_id);
 
     if (argc == 2) { // init controll-process (lo2s_factory [JOBID])
-        if(getenv("LO2S_is_set") == "true") return 0; 
+        if(strcmp(getenv("LO2S_is_set"), "true") == 0) return 0; 
         setenv("LO2S_is_set", "true", 1);
         char buffer[BUFFER_SIZE];
         int fifo_fd;
@@ -109,6 +107,9 @@ int main(int argc, char *argv[]) {
                             // Im Kindprozess: Stream schließen
                     fclose(fifo_stream);
 
+                    freopen("/tmp/lo2s_error.log", "a", stderr);
+                    freopen("/tmp/lo2s_output.log", "a", stdout);
+
                     char *trace_path = strtok(buffer, DELIMITER);
                     char *cgroup_path = strtok(NULL, DELIMITER);
                     
@@ -133,6 +134,11 @@ int main(int argc, char *argv[]) {
                         }
 
                         exit(1);
+                    }
+                    log_file = fopen("/tmp/spank_prolog.log", "a");
+                    if (log_file != NULL) {
+                        fprintf(log_file, "[Info] EXEC for: %s; %s\n", trace_path, cgroup_path);
+                        fclose(log_file);
                     }
                 }
                 // Der Elternprozess läuft dank SA_NOCLDWAIT sofort weiter, 
