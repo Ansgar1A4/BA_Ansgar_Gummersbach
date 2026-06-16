@@ -14,10 +14,7 @@ SPANK_PLUGIN(lo2do, 1);
 static uint8_t lo2do_is_set = 0;
 static char lo2s_trace_path[256] = ""; 
 
-struct sigaction sa;
-
 int _lo2do_cb(int val, const char *optarg, int remote) {
-    
     if (remote) {
         lo2do_is_set = 1;
         if (optarg && strcmp(optarg, "(null)") != 0) {
@@ -60,17 +57,12 @@ int slurm_spank_init(spank_t sp, int ac, char **av) {
 }
 
 int slurm_spank_job_prolog(spank_t sp, int ac, char **av) {
-    uint32_t job_id = 0; // STRENGER TYP: uint32_t
+    uint32_t job_id = 0;
     
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) {
         write_log("[Prolog] Fehler beim Holen der Job-ID\n");
         return 0;
     }
-
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_IGN; 
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    sigaction(SIGCHLD, &sa, NULL);
 
     int ret = init_lo2s_factory(job_id);
     write_log("after init factory: ");
@@ -79,30 +71,25 @@ int slurm_spank_job_prolog(spank_t sp, int ac, char **av) {
     return ret;
 }
 
-int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
-    // 1. Kontext prüfen
+int slurm_spank_task_post_fork(spank_t sp, int ac, char **av) {
     if (spank_context() != S_CTX_REMOTE) {
         return 0;
     }
     
     write_log("[SPANK] init_post_opt gestartet!\n");
 
-
     uint32_t job_id = 0;
-    uint32_t step_id = 0; // Verwende uint32_t analog zu Slurm
+    uint32_t step_id = 0; 
     int node_id = 0;
 
-    spank_err_t j_err = spank_get_item(sp, S_JOB_ID, &job_id);
-    spank_err_t s_err = spank_get_item(sp, S_JOB_STEPID, &step_id);
-    spank_err_t n_err = spank_get_item(sp, S_JOB_NODEID, &node_id);
+    spank_get_item(sp, S_JOB_ID, &job_id);
+    spank_get_item(sp, S_JOB_STEPID, &step_id);
+    spank_get_item(sp, S_JOB_NODEID, &node_id);
 
     char log[256];
     snprintf(log, sizeof(log), "[SPANK] Kontext Remote -> JID: %u, SID: %u, NID: %d\n", job_id, step_id, node_id);
     write_log(log);
 
-    // HINWEIS: Wenn du den Batch-Step (Skript-Executor) ignorieren willst, 
-    // der hat oft SLURM_BATCH_SCRIPT (0xffffffff bzw. 4294967295).
-    // Wenn du normale srun-Schritte loggen willst (SID: 0, 1, 2...), lass den Filter weg oder logge ihn nur:
     if (step_id > 0) { 
         write_log("[SPANK] Ignoriere Batch-Script-Step, warte auf echten Task-Step.\n");
         return 0; 
@@ -117,40 +104,47 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
     char final_trace_path[512];
     char job_cgroup_path[512];
 
-    // Node-ID für Dateinamen nutzen
-    snprintf(final_trace_path, sizeof(final_trace_path), "%s/lo2s_trace_%u_%d", 
-             lo2s_trace_path, job_id, node_id);
-    
+    snprintf(final_trace_path, sizeof(final_trace_path), "%s/lo2s_trace_%u_%d", lo2s_trace_path, job_id, node_id);
     snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/system.slice/slurmstepd.scope/job_%u", job_id);
     
+    // Ersetze die Pfad-Logik durch eine flexiblere Suche
+    //char job_cgroup_path[512];
+    // Suche nach dem Job-Verzeichnis unterhalb von /sys/fs/cgroup/
+    // Wir nutzen hier eine einfache Methode, um das Verzeichnis zu finden:
+    snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/system.slice/slurmstepd.scope/job_%u", job_id);
+
+    if (access(job_cgroup_path, F_OK) != 0) {
+        // Falls nicht da, prüfe den Standard-Pfad für manche Setups
+        snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/cpu/slurm/uid_%u/job_%u", getuid(), job_id);
+    }
+    
+// Wenn immer noch nicht da: Gib eine Warnung aus, aber lass lo2s laufen, falls möglich
+
+    /*
     if (access(job_cgroup_path, F_OK) != 0) {
         write_log("[CGROUP] FALLBACK auf system.slice\n");
         snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/system.slice/job_%u", job_id);
-        if (access(job_cgroup_path, F_OK) != 0) {
-            write_log("[CGROUP] FAIL: Cgroup-Pfad existiert nicht!\n");
-        }
     }
+    */
 
     snprintf(log, sizeof(log), "[SPANK] Sende an Factory -> TP: %s | CP: %s\n", final_trace_path, job_cgroup_path);
     write_log(log);
 
-    // Hier wird die Factory getriggert (argc == 4-Zweig)
     return init_monitoring_process(job_id, final_trace_path, job_cgroup_path);
 }
 
+
 int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
-    uint32_t job_id = 0; // STRENGER TYP
+    uint32_t job_id = 0;
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) {
         return 0;
     }
-
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_IGN; 
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    sigaction(SIGCHLD, &sa, NULL);
-
-    return close_lo2s_factory(job_id);
+    int ret = close_lo2s_factory(job_id);
+    return ret;
 }
+
+
+
 
 
 
@@ -166,80 +160,64 @@ int init_lo2s_factory(uint32_t job_id) {
     if (pid1 == 0) { 
         pid_t pid2 = fork();
         if (pid2 < 0) exit(1);
-        if (pid2 > 0) exit(0); // Vater stirbt sofort
+        if (pid2 > 0) exit(0); // Erster Vater stirbt sofort für Daemonisierung
 
-        if (setsid() < 0) exit(1); // Eigene Session aufmachen
+        if (setsid() < 0) exit(1); 
 
-        // RADIKALE ENTKOPPLUNG: Unbedingt einkommentieren!
-        freopen("/dev/null", "r", stdin);
-        freopen("/dev/null", "w", stdout);
-        freopen("/dev/null", "w", stderr);
-        
+        //freopen("/dev/null", "r", stdin);
+        //freopen("/dev/null", "w", stdout);
+        //freopen("/dev/null", "w", stderr);
+        // Statt: freopen("/dev/null", "w", stdout);
+        // Nimm eine eindeutige Log-Datei:
+        char log_path[256];
+        snprintf(log_path, sizeof(log_path), "/tmp/lo2s_debug_%d.log", job_id);
+        freopen(log_path, "a", stdout);
+        freopen(log_path, "a", stderr);
+                
         char job_id_str[32];
         snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
         
         char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, NULL};
         execvp(args[0], args);
-        
         exit(1);
     } else { 
         int status;
-        waitpid(pid1, &status, 0); // Wartet nur auf das sofort sterbende erste Kind
+        waitpid(pid1, &status, 0); 
     }
     return 0;
 }
-
 
 static int _execute_factory_cmd(uint32_t job_id, char *args[]) {
     pid_t pid = fork();
     if (pid < 0) return -1;
 
     if (pid == 0) { 
-        freopen("/dev/null", "r", stdin);
-        freopen("/dev/null", "w", stdout);
-        freopen("/dev/null", "w", stderr);
+        //freopen("/dev/null", "r", stdin);
+        //freopen("/dev/null", "w", stdout);
+        //freopen("/dev/null", "w", stderr);
         
-        write_log("INIT EXEC\n");
         execvp(args[0], args);
-        
-        write_log("EXEC FAILED\n");
         exit(1); 
     } else {
         int status;
-        // Die 0 zwingt den Elternprozess (SPANK), auf das Kind zu warten.
-        // Das schützt den Schreibvorgang in die Pipe vor dem Slurm-Cleanup!
-        waitpid(pid, &status, 0); 
+        waitpid(pid, &status, 0); // Blockiert kurz, um Pipe-Schreiben vor Cgroup-Kill zu schützen
     }
     return 0;
 }
+
 int close_lo2s_factory(uint32_t job_id) {
     char job_id_str[32];
     snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-
-    char *args[] = {
-        "/usr/local/bin/lo2s_factory", 
-        job_id_str, 
-        "exit_lo2s", 
-        NULL
-    };
+    char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, "exit_lo2s", NULL};
     write_log("End Monitoring\n");
-
-    return _execute_factory_cmd(job_id, args);
+    execvp(args[0], args);
+    return 0;
 }
 
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path) {
     char job_id_str[32];
     snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-
-    char *args[] = {
-        "/usr/local/bin/lo2s_factory", 
-        job_id_str, 
-        (char *)trace_path, 
-        (char *)cgroup_path, 
-        NULL
-    };
-
-    write_log("init_lo2s_factory\n");
-
+    char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, (char *)trace_path, (char *)cgroup_path, NULL};
+    write_log("init_lo2s_monitoring\n");
     return _execute_factory_cmd(job_id, args);
 }
