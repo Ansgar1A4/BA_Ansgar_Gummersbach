@@ -179,8 +179,6 @@ int main(int argc, char *argv[]) {
                     }
                     
                     //snprintf(found_path, sizeof(found_path), "/sys/fs/cgroup/system.slice/slurmstepd.scope/job_%d");
-
-
                     // Direkt ausführen ohne den Bash-Umweg, da wir die Umgebung jetzt via task_exit sichern
                     char *args[] = {"/usr/local/bin/lo2s", "-o", trace_path, "-aS", "--cgroup", found_path, NULL};
 

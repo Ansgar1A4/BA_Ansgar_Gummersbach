@@ -38,8 +38,8 @@ struct spank_option all_spank_options[] = {
     SPANK_OPTIONS_TABLE_END
 };
 
-int init_lo2s_factory(uint32_t job_id);
-int close_lo2s_factory(uint32_t job_id);
+int init_lo2d(uint32_t job_id);
+int close_lo2sd(uint32_t job_id);
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path);
 
 void write_log(const char *log_str) {
@@ -64,7 +64,7 @@ int slurm_spank_job_prolog(spank_t sp, int ac, char **av) {
         return 0;
     }
 
-    int ret = init_lo2s_factory(job_id);
+    int ret = init_lo2d(job_id);
     write_log("after init factory: ");
     char *ret_is_0 = ret == 0 ? "is_zero\n" : "is not zero\n";
     write_log(ret_is_0);
@@ -139,7 +139,7 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) {
         return 0;
     }
-    int ret = close_lo2s_factory(job_id);
+    int ret = close_lo2sd(job_id);
     return ret;
 }
 
@@ -153,7 +153,7 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
 
 
 
-int init_lo2s_factory(uint32_t job_id) {
+int init_lo2d(uint32_t job_id) {
     pid_t pid1 = fork();
     if (pid1 < 0) return -1;
 
@@ -177,7 +177,7 @@ int init_lo2s_factory(uint32_t job_id) {
         char job_id_str[32];
         snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
         
-        char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, NULL};
+        char *args[] = {"/usr/local/bin/lo2d", job_id_str, NULL};
         execvp(args[0], args);
         exit(1);
     } else { 
@@ -187,6 +187,11 @@ int init_lo2s_factory(uint32_t job_id) {
     return 0;
 }
 
+
+/// @brief UNUSED: Führt den lo2d-Befehl aus, wartet auf dessen Beendigung und gibt den Status zurück.
+/// @param job_id 
+/// @param args 
+/// @return 
 static int _execute_factory_cmd(uint32_t job_id, char *args[]) {
     pid_t pid = fork();
     if (pid < 0) return -1;
@@ -205,10 +210,10 @@ static int _execute_factory_cmd(uint32_t job_id, char *args[]) {
     return 0;
 }
 
-int close_lo2s_factory(uint32_t job_id) {
+int close_lo2sd(uint32_t job_id) {
     char job_id_str[32];
     snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-    char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, "exit_lo2s", NULL};
+    char *args[] = {"/usr/local/bin/lo2d", job_id_str, "exit_lo2s", NULL};
     write_log("End Monitoring\n");
     execvp(args[0], args);
     return 0;
@@ -217,7 +222,7 @@ int close_lo2s_factory(uint32_t job_id) {
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path) {
     char job_id_str[32];
     snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-    char *args[] = {"/usr/local/bin/lo2s_factory", job_id_str, (char *)trace_path, (char *)cgroup_path, NULL};
+    char *args[] = {"/usr/local/bin/lo2d", job_id_str, (char *)trace_path, (char *)cgroup_path, NULL};
     write_log("init_lo2s_monitoring\n");
     return _execute_factory_cmd(job_id, args);
 }

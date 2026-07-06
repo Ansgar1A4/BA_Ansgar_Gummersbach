@@ -70,3 +70,6 @@ archive/
 .claude/
 *.md
 !README*md
+
+
+saved_traces/
