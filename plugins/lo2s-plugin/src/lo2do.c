@@ -6,9 +6,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/wait.h> 
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
+
+#define FIFO_FILE "/tmp/factory_pipe"
+#define FIFO_RETRY_COUNT 20
+#define FIFO_RETRY_US 100000
+#define MAX_FACTORY_COMMAND_LEN 1536
 
 SPANK_PLUGIN(lo2do, 1);
 
@@ -55,6 +63,8 @@ struct spank_option all_spank_options[] = {
 int init_lo2d(uint32_t job_id);
 int close_lo2sd(uint32_t job_id);
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path, const char *additional_args);
+static int send_factory_command(uint32_t job_id, const char *payload);
+static int send_factory_exit(uint32_t job_id);
 
 void write_log(const char *log_str) {
     FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
@@ -171,57 +181,59 @@ int init_lo2d(uint32_t job_id) {
 }
 
 
-/// @brief UNUSED: Führt den lo2d-Befehl aus, wartet auf dessen Beendigung und gibt den Status zurück.
-/// @param job_id 
-/// @param args 
-/// @return 
-static int _execute_factory_cmd(uint32_t job_id, char *args[]) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        write_logf("[SPANK][CMD] fork failed for job_id=%u: %s\n", job_id, strerror(errno));
+static int send_factory_command(uint32_t job_id, const char *payload) {
+    char pipe_path[128];
+    snprintf(pipe_path, sizeof(pipe_path), "%s%u", FIFO_FILE, job_id);
+
+    int fifo_fd = -1;
+    for (int i = 0; i < FIFO_RETRY_COUNT; ++i) {
+        fifo_fd = open(pipe_path, O_WRONLY | O_CLOEXEC);
+        if (fifo_fd >= 0) {
+            break;
+        }
+        if (errno == ENXIO || errno == ENOENT) {
+            usleep(FIFO_RETRY_US);
+            continue;
+        }
+        write_logf("[SPANK][CMD] open(%s) failed: %s\n", pipe_path, strerror(errno));
+        return -1;
+    }
+    if (fifo_fd < 0) {
+        write_logf("[SPANK][CMD] open(%s) failed after retries: %s\n", pipe_path, strerror(errno));
         return -1;
     }
 
-    if (pid == 0) {
-        execvp(args[0], args);
-        _exit(127);
-    } else {
-        int status;
-        if (waitpid(pid, &status, 0) < 0) {
-            write_logf("[SPANK][CMD] waitpid failed for job_id=%u: %s\n", job_id, strerror(errno));
-            return -1;
-        }
-        if (WIFEXITED(status)) {
-            int rc = WEXITSTATUS(status);
-            if (rc != 0) {
-                write_logf("[SPANK][CMD] command exited rc=%d for job_id=%u\n", rc, job_id);
-            } else {
-                write_logf("[SPANK][CMD] command exited success for job_id=%u\n", job_id);
-            }
-            return rc;
-        }
-        if (WIFSIGNALED(status)) {
-            int sig = WTERMSIG(status);
-            write_logf("[SPANK][CMD] command killed by signal %d for job_id=%u\n", sig, job_id);
-            return 128 + sig;
-        }
-        write_logf("[SPANK][CMD] waitpid returned unknown status 0x%x for job_id=%u\n", status, job_id);
-        return status;
+    ssize_t len = strlen(payload);
+    ssize_t written = write(fifo_fd, payload, len);
+    if (written != len) {
+        write_logf("[SPANK][CMD] write(%s) failed: %s\n", pipe_path, strerror(errno));
+        close(fifo_fd);
+        return -1;
     }
+    if (write(fifo_fd, "\n", 1) != 1) {
+        write_logf("[SPANK][CMD] write newline to %s failed: %s\n", pipe_path, strerror(errno));
+        close(fifo_fd);
+        return -1;
+    }
+    close(fifo_fd);
+    return 0;
+}
+
+static int send_factory_exit(uint32_t job_id) {
+    return send_factory_command(job_id, "exit_lo2s");
 }
 
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path, const char *additional_args) {
-    char job_id_str[32];
-    snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-    char *args[] = {"/usr/local/bin/lo2d", job_id_str, (char *)trace_path, (char *)cgroup_path, (char *)additional_args, NULL};
-    //write_log("init_lo2s_monitoring\n");
-    return _execute_factory_cmd(job_id, args);
+    char payload[MAX_FACTORY_COMMAND_LEN];
+    if (additional_args && additional_args[0] != '\0') {
+        snprintf(payload, sizeof(payload), "%s;%s;%s", trace_path, cgroup_path, additional_args);
+    } else {
+        snprintf(payload, sizeof(payload), "%s;%s", trace_path, cgroup_path);
+    }
+    return send_factory_command(job_id, payload);
 }
 
 int close_lo2sd(uint32_t job_id) {
-    char job_id_str[32];
-    snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-    char *args[] = {"/usr/local/bin/lo2d", job_id_str, "exit_lo2s", NULL};
-    return _execute_factory_cmd(job_id, args);
+    return send_factory_exit(job_id);
 }
 
