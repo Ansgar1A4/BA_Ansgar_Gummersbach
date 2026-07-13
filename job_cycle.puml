@@ -1,0 +1,80 @@
+@startuml job_cycle
+!pragma teoz true
+autonumber
+hide footbox
+
+!$BG = "#FFFFFF"
+!$SC = "#FFDDDD"
+!$SD = "#DDDDFF"
+!$SS = "#DDFFDD"
+!$JOB = "#DD9999"
+
+!$AG = "#BBBBBB"
+!$AI = "#b13535"
+!$AD = "#33ff77"
+
+skinparam backgroundColor $BG 
+
+
+skinparam sequence {
+    ArrowColor $AG
+
+    LifeLineBorderColor $BG
+    LifeLineBackgroundColor #8888FF
+
+
+    ParticipantBorderColor #00000000
+    ParticipantBackgroundColor #00000000
+    ParticipantFontSize 0
+    ParticipantFontColor DeepSkyBlue
+
+    ActorBackgroundColor aqua
+    ActorFontColor DeepSkyBlue
+    ActorFontSize 17
+    ActorFontName Aapex
+
+    PartitionBorderColor #FF0000
+}
+
+skinparam NoteBackgroundColor $BG
+skinparam NoteBorderColor #000000
+
+skinparam maxMessageSize 100
+
+skinparam BorderColor $BG00
+
+skinparam PartitionFontSize 0
+
+participant "Node" as sd
+participant "Stepd" as ss
+participant mdi
+participant "Monitoring Deamon" as md
+
+
+
+activate sd $SD
+rnote left sd $SD: slurmd
+
+[--> sd
+sd -[$AI]> sd ++ $JOB : init_job_env 
+sd -[$SC]-> md ++ $SC
+sd -[$AI]-> sd : clarify hardware
+partition  
+ss --> md: start_monitoring
+activate md
+sd --> ss ++ $SS : init_step_0
+ss --> ss: exec_task
+ss --> sd: exit_step_0
+deactivate ss
+skinparam NoteBorderColor #00000000
+rnote over sd: ·····
+sd --> ss ++ $SS : init_step_n
+return exit_step_n
+end
+sd --> md: close Deamon while cleanup
+deactivate md
+deactivate md
+return exit_job_env
+
+
+@enduml

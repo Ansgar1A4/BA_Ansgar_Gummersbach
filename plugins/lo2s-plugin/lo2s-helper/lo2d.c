@@ -8,13 +8,26 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <errno.h>
+#include <stdarg.h>
 
 #define FIFO_FILE "/tmp/factory_pipe"
 #define BUFFER_SIZE 256
 #define DELIMITER ";"
 
 int job_id = -1;
-pid_t current_lo2s_pid = -1; // HIER: Merkt sich die PID des laufenden lo2s-Prozesses
+pid_t current_lo2s_pid = -1;
+
+static void log_lo2d(const char *format, ...) {
+    FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
+    if (!log_file) return;
+    va_list ap;
+    va_start(ap, format);
+    vfprintf(log_file, format, ap);
+    va_end(ap);
+    fflush(log_file);
+    fclose(log_file);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -85,36 +98,42 @@ int main(int argc, char *argv[]) {
 
                 buffer[strcspn(buffer, "\n")] = 0; // Newline entfernen
                 if (strlen(buffer) == 0) continue;
-
-                log_file = fopen("/tmp/spank_prolog.log", "a");
-                if (log_file != NULL) {
-                    fprintf(log_file, "GETS: %s\n", buffer);
-                    fclose(log_file);
-                }
                 
                 // EXIT BEFEHL VERARBEITEN
                 if (strcmp(buffer, "exit_lo2s") == 0) {
                     // PID aus Datei lesen
-                    FILE *f = fopen("/tmp/lo2s_current_pid", "r");
+                    char pid_file[256] = "";
+                    snprintf(pid_file, sizeof(pid_file), "/tmp/lo2s_pid_%d", job_id);
+                    FILE *f = fopen(pid_file, "r");
                     if (f) {
                         fscanf(f, "%d", &current_lo2s_pid);
                         fclose(f);
                     }
                     
                     if (current_lo2s_pid > 0) {
-                        kill(-current_lo2s_pid, SIGINT);
-                        sleep(3);
-                        // Wir warten, bis der Prozess wirklich weg ist.
-
-                        for(int i = 0; i < 20; i++) {
-                            // kill gibt -1 zurück (und setzt errno auf ESRCH), wenn der Prozess nicht mehr existiert
-                            if (kill(current_lo2s_pid, 0) == -1) {
-                                break; // Prozess ist erfolgreich beendet
+                        log_lo2d("[LO2D] stop: found lo2s pgid=%d\n", current_lo2s_pid);
+                        if (kill(-current_lo2s_pid, 0) == 0) {
+                            // Give lo2s a short time to flush output before terminating it.
+                            sleep(2);
+                            if (kill(-current_lo2s_pid, SIGINT) == 0) {
+                                log_lo2d("[LO2D] stop: sent SIGINT to pgid=%d\n", current_lo2s_pid);
+                            } else {
+                                log_lo2d("[LO2D] stop: failed to send SIGINT to pgid=%d: %s\n", current_lo2s_pid, strerror(errno));
                             }
-                            usleep(500000); // 500ms warten
+                            for (int i = 0; i < 20; i++) {
+                                if (kill(current_lo2s_pid, 0) == -1) {
+                                    log_lo2d("[LO2D] stop: lo2s exited after %d checks\n", i + 1);
+                                    break;
+                                }
+                                usleep(500000);
+                            }
+                            if (kill(current_lo2s_pid, 0) == 0) {
+                                log_lo2d("[LO2D] stop: lo2s still alive after timeout, sending SIGKILL pgid=%d\n", current_lo2s_pid);
+                                kill(-current_lo2s_pid, SIGKILL);
+                            }
+                        } else {
+                            log_lo2d("[LO2D] stop: lo2s pgid=%d not alive\n", current_lo2s_pid);
                         }
-                        
-                        // 3. Dateisystem-Flush erzwingen, bevor wir den Prozess "vergessen"
                         sync(); 
                     }
                     fclose(fifo_stream); 
@@ -122,8 +141,8 @@ int main(int argc, char *argv[]) {
                     exit(0);
                 }
 
-                if(getenv("LOS_TRACE") != NULL) continue;
-                setenv("LOS_TRACE", "true", 1);
+                if(getenv("LO2S_TRACE") != NULL) continue;
+                setenv("LO2S_TRACE", "true", 1);
 
 
                 // TRACE STARTEN (FORK)
@@ -141,12 +160,14 @@ int main(int argc, char *argv[]) {
 
                     char *trace_path = strtok(buffer_copy, DELIMITER);
                     char *cgroup_path = strtok(NULL, DELIMITER);
+                    char *extra_args = strtok(NULL, DELIMITER);
                     
                     if (trace_path == NULL) {
                         exit(1);
                     }
 
                     // KEIN clearenv()! Wir erweitern nur das bestehende Environment
+                    // TODO: Path nur auf lo2s-Pfad setzen
                     setenv("PATH", "/usr/bin:/usr/local/bin:/usr/sbin:/sbin", 1);
 
                     // Fehler-Logs wieder aktivieren!
@@ -180,8 +201,26 @@ int main(int argc, char *argv[]) {
                     
                     //snprintf(found_path, sizeof(found_path), "/sys/fs/cgroup/system.slice/slurmstepd.scope/job_%d");
                     // Direkt ausführen ohne den Bash-Umweg, da wir die Umgebung jetzt via task_exit sichern
-                    char *args[] = {"/usr/local/bin/lo2s", "-o", trace_path, "-aS", "--cgroup", found_path, NULL};
+                    char *args[32];
+                    int arg_i = 0;
+                    args[arg_i++] = "/usr/local/bin/lo2s";
+                    args[arg_i++] = "-o";
+                    args[arg_i++] = trace_path;
+                    args[arg_i++] = "-aS";
+                    args[arg_i++] = "--cgroup";
+                    args[arg_i++] = found_path;
 
+                    if (extra_args != NULL && strlen(extra_args) > 0) {
+                        char *opt = strtok(extra_args, " ");
+                        while (opt != NULL && arg_i < (int)(sizeof(args)/sizeof(args[0]) - 1)) {
+                            args[arg_i++] = opt;
+                            opt = strtok(NULL, " ");
+                        }
+                    }
+                    args[arg_i] = NULL;
+                    for (int i = 0; i < arg_i; i++) {
+                        log_lo2d("[LO2D] start: arg[%d]=%s\n", i, args[i]);
+                    }
                     if (execvp(args[0], args) < 0) {
                         perror("execvp fehlgeschlagen");
                         exit(1);
@@ -189,28 +228,58 @@ int main(int argc, char *argv[]) {
                 } else { 
                     // Elternprozess-Teil
                     current_lo2s_pid = pid;
-                    FILE *f = fopen("/tmp/lo2s_current_pid", "w");
+                    char pid_file[256] = "";
+                    snprintf(pid_file, sizeof(pid_file), "/tmp/lo2s_pid_%d", job_id);
+                    FILE *f = fopen(pid_file, "w");
                     if (f) { fprintf(f, "%d", pid); fclose(f); }
                 }
                 
             }
             fclose(fifo_stream); 
         }
-    } else if (argc == 3) { // stop control-process
+    }
+
+    ///WRITE FIFO COMMANDS
+
+    else if (argc == 3) { // stop control-process (lo2d [JOBID] exit_lo2s)
         int fifo_fd = open(pipe_path, O_WRONLY);
         if (fifo_fd < 0) {
+            log_lo2d("[LO2D] stop: open(%s) failed: %s\n", pipe_path, strerror(errno));
             exit(1);
         }
-        dprintf(fifo_fd, "exit_lo2s\n");
+        if (dprintf(fifo_fd, "exit_lo2s\n") < 0) {
+            log_lo2d("[LO2D] stop: dprintf failed: %s\n", strerror(errno));
+            close(fifo_fd);
+            exit(1);
+        }
+        log_lo2d("[LO2D] stop: command written to %s\n", pipe_path);
         close(fifo_fd);
-    } else if (argc == 4) { // start lo2s
+        return 0;
+    } else if (argc >= 4) { // start lo2s (lo2d [JOBID] [TRACE_PATH] [CGROUP_PATH])
         int fifo_fd = open(pipe_path, O_WRONLY);
         if (fifo_fd < 0) {
+            log_lo2d("[LO2D] start: open(%s) failed: %s\n", pipe_path, strerror(errno));
             exit(1);
         }
-        dprintf(fifo_fd, "%s%s%s\n", argv[2], DELIMITER, argv[3]);
+        if (argc >= 5 && argv[4] != NULL && strlen(argv[4]) > 0) {
+            if (dprintf(fifo_fd, "%s%s%s%s%s\n", argv[2], DELIMITER, argv[3], DELIMITER, argv[4]) < 0) {
+                log_lo2d("[LO2D] start: dprintf failed: %s\n", strerror(errno));
+                close(fifo_fd);
+                exit(1);
+            }
+            log_lo2d("[LO2D] start: command written to %s trace=%s cgroup=%s extra_args=%s\n", pipe_path, argv[2], argv[3], argv[4]);
+        } else {
+            if (dprintf(fifo_fd, "%s%s%s\n", argv[2], DELIMITER, argv[3]) < 0) {
+                log_lo2d("[LO2D] start: dprintf failed: %s\n", strerror(errno));
+                close(fifo_fd);
+                exit(1);
+            }
+            log_lo2d("[LO2D] start: command written to %s trace=%s cgroup=%s\n", pipe_path, argv[2], argv[3]);
+        }
         close(fifo_fd);
+        return 0;
     } else {
+        log_lo2d("[LO2D] invalid argc=%d\n", argc);
         exit(1);
     }
     return 0;

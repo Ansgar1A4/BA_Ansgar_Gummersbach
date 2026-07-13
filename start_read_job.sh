@@ -5,6 +5,7 @@ for i in {1..4}; do
 done
 
 docker exec slurmctld bash -c 'sbatch do_lo2s_test.sh'
+docker exec slurmctld bash -c 'rm -rf lo2s_trace_*'
 
 sleep 2
 
