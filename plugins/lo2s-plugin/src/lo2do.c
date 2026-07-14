@@ -17,6 +17,9 @@
 #define FIFO_RETRY_COUNT 20
 #define FIFO_RETRY_US 100000
 #define MAX_FACTORY_COMMAND_LEN 1536
+#define TRACE_PATH "/data"
+#define TRACE_PATH_EDITABLE 1
+
 
 SPANK_PLUGIN(lo2do, 1);
 
@@ -27,11 +30,14 @@ static char lo2s_cgroup_path[256] = "";
 static char lo2s_additional_args[256] = "";
 
 
+
 int _lo2do_cb(int val, const char *optarg, int remote) {
     if (remote) {
         lo2do_is_set = 1;
-        if (optarg && strcmp(optarg, "(null)") != 0) {
+        if (TRACE_PATH_EDITABLE && optarg && strcmp(optarg, "(null)") != 0) {
             snprintf(lo2s_trace_path, sizeof(lo2s_trace_path), "%s", optarg);
+        }else{
+            snprintf(lo2s_trace_path, sizeof(lo2s_trace_path), "%s", TRACE_PATH);
         }
     }
     return 0;
@@ -39,9 +45,8 @@ int _lo2do_cb(int val, const char *optarg, int remote) {
 
 int _lo2do_args_cb(int val, const char *optarg, int remote) {
     if (remote) {
-        if (optarg && strcmp(optarg, "(null)") != 0) {
-            snprintf(lo2s_additional_args, sizeof(lo2s_additional_args), "%s", optarg);
-        }
+        nprintf(lo2s_additional_args, sizeof(lo2s_additional_args), "%s", optarg);
+
     }
     return 0;
 }
@@ -50,7 +55,7 @@ struct spank_option all_spank_options[] = {
     {
         "lo2do", "TRACE_PATH", 
         "Enable lo2s System-Monitoring for given job per node, writing generated otf2-traces to given TRACE_PATH",
-        2, 0, _lo2do_cb
+        TRACE_PATH_EDITABLE ? 2 : 0, 0, _lo2do_cb
     },
     {
         "lo2do_args", "ARGUMENTS",
@@ -108,6 +113,7 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
     if (!lo2do_is_set) {
         write_log("[SPANK] lo2do nicht aktiviert, überspringe Task-Post-Fork.\n");
         // TODO: close daemon
+
         return 0;
     }
     
@@ -120,21 +126,12 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
  
 
     if (step_id != 0)return 0; 
-
-    if (strlen(lo2s_trace_path) == 0) {
-        if (!getcwd(lo2s_trace_path, sizeof(lo2s_trace_path))) {
-            return -1;
-        }
-    }
-
+    
     char final_trace_path[512];
     char job_cgroup_path[512];
     snprintf(final_trace_path, sizeof(final_trace_path), "%s/lo2s_trace_%u_%d", lo2s_trace_path, job_id, node_id);
     snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/system.slice/job_%u", job_id);
 
-    if (access(job_cgroup_path, F_OK) != 0) {
-        snprintf(job_cgroup_path, sizeof(job_cgroup_path), "/sys/fs/cgroup/cpu/slurm/uid_%u/job_%u", getuid(), job_id);
-    }
     
     const char *additional_args = strlen(lo2s_additional_args) ? lo2s_additional_args : NULL;
     return init_monitoring_process(job_id, final_trace_path, job_cgroup_path, additional_args);

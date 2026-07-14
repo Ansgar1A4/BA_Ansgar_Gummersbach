@@ -17,6 +17,7 @@
 
 int job_id = -1;
 pid_t current_lo2s_pid = -1;
+volatile sig_atomic_t lo2s_exited = 0;
 
 static void log_lo2d(const char *format, ...) {
     FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
@@ -27,6 +28,19 @@ static void log_lo2d(const char *format, ...) {
     va_end(ap);
     fflush(log_file);
     fclose(log_file);
+}
+
+static void handle_sigchld(int sig) {
+    (void)sig;
+    int saved_errno = errno;
+    while (1) {
+        pid_t pid = waitpid(-1, NULL, WNOHANG);
+        if (pid <= 0) break;
+        if (pid == current_lo2s_pid) {
+            lo2s_exited = 1;
+        }
+    }
+    errno = saved_errno;
 }
 
 int main(int argc, char *argv[]) {
@@ -50,12 +64,11 @@ int main(int argc, char *argv[]) {
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
-    sigemptyset(&sa.sa_mask); 
-    
-    // SA_NOCLDWAIT sorgt dafür, dass Kinder NIEMALS zu Zombies werden!
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP | SA_NOCLDWAIT; 
-    sa.sa_handler = SIG_DFL; 
-    
+    sigemptyset(&sa.sa_mask);
+
+    sa.sa_flags = SA_NOCLDSTOP;
+    sa.sa_handler = handle_sigchld;
+
     if (sigaction(SIGCHLD, &sa, NULL) < 0) {
         perror("Signal-Setup fehlgeschlagen");
         exit(1);
@@ -80,6 +93,11 @@ int main(int argc, char *argv[]) {
         fifo_fd = open(pipe_path, O_RDONLY | O_CLOEXEC);
         if (fifo_fd < 0) {
             if (errno == EINTR) {
+                if (lo2s_exited) {
+                    log_lo2d("[LO2D] lo2s exited, shutting down daemon\n");
+                    unlink(pipe_path);
+                    return 0;
+                }
                 continue;
             }
             perror("open fehlgeschlagen");
@@ -113,23 +131,31 @@ int main(int argc, char *argv[]) {
                 if (current_lo2s_pid > 0) {
                     log_lo2d("[LO2D] stop: found lo2s pgid=%d\n", current_lo2s_pid);
                     if (kill(-current_lo2s_pid, 0) == 0) {
-                        // Give lo2s a short time to flush output before terminating it.
-                        sleep(2);
-                        if (kill(-current_lo2s_pid, SIGINT) == 0) {
-                            log_lo2d("[LO2D] stop: sent SIGINT to pgid=%d\n", current_lo2s_pid);
+                        int wait_checks = 0;
+                        int wait_max = 20;
+                        while (wait_checks < wait_max && kill(current_lo2s_pid, 0) == 0) {
+                            usleep(100000);
+                            wait_checks++;
+                        }
+                        if (kill(current_lo2s_pid, 0) != 0) {
+                            log_lo2d("[LO2D] stop: lo2s already exited after %d checks\n", wait_checks);
                         } else {
-                            log_lo2d("[LO2D] stop: failed to send SIGINT to pgid=%d: %s\n", current_lo2s_pid, strerror(errno));
-                        }
-                        for (int i = 0; i < 20; i++) {
-                            if (kill(current_lo2s_pid, 0) == -1) {
-                                log_lo2d("[LO2D] stop: lo2s exited after %d checks\n", i + 1);
-                                break;
+                            if (kill(-current_lo2s_pid, SIGINT) == 0) {
+                                log_lo2d("[LO2D] stop: sent SIGINT to pgid=%d\n", current_lo2s_pid);
+                            } else {
+                                log_lo2d("[LO2D] stop: failed to send SIGINT to pgid=%d: %s\n", current_lo2s_pid, strerror(errno));
                             }
-                            usleep(500000);
-                        }
-                        if (kill(current_lo2s_pid, 0) == 0) {
-                            log_lo2d("[LO2D] stop: lo2s still alive after timeout, sending SIGKILL pgid=%d\n", current_lo2s_pid);
-                            kill(-current_lo2s_pid, SIGKILL);
+                            for (int i = 0; i < 20; i++) {
+                                if (kill(current_lo2s_pid, 0) == -1) {
+                                    log_lo2d("[LO2D] stop: lo2s exited after %d checks\n", i + 1);
+                                    break;
+                                }
+                                usleep(500000);
+                            }
+                            if (kill(current_lo2s_pid, 0) == 0) {
+                                log_lo2d("[LO2D] stop: lo2s still alive after timeout, sending SIGKILL pgid=%d\n", current_lo2s_pid);
+                                kill(-current_lo2s_pid, SIGKILL);
+                            }
                         }
                     } else {
                         log_lo2d("[LO2D] stop: lo2s pgid=%d not alive\n", current_lo2s_pid);
@@ -182,17 +208,13 @@ int main(int argc, char *argv[]) {
                 FILE *fp = popen(cmd, "r");
                 if (fp) {
                     if (fgets(found_path, sizeof(found_path), fp) != NULL) {
+                        log_lo2d("[LO2D] found cgroup: %s\n", found_path);
                         found_path[strcspn(found_path, "\n")] = 0;
                     }
                     pclose(fp);
                 }
 
                 log_file = fopen("/tmp/spank_prolog.log", "a");
-                if (log_file != NULL) {
-                    fprintf(log_file, " found cgroup: %s\n", found_path);
-                    fclose(log_file);
-                }
-
 
                 if (strlen(found_path) == 0) {
                     fprintf(stderr, "[FATAL] Cgroup für Job %d nirgends gefunden!\n", job_id);
