@@ -116,6 +116,7 @@ int slurm_spank_init(spank_t sp, int ac, char **av) {
 int slurm_spank_job_prolog(spank_t sp, int ac, char **av) {
     uint32_t job_id = 0;
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) return 1;
+    write_logf("[SPANK] Starting lo2s daemon for job %u, user %u\n", job_id, getuid());
     return init_lo2d(job_id);
 }
 
@@ -153,7 +154,7 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
         close_lo2sd(job_id);
         return 0;
     }
-
+    write_logf("[SPANK] lo2do aktiviert, starte lo2s Monitoring Prozess für Job %u, Node %u, User %u\n", job_id, node_id, getuid());
     char ugid_file[256] = "";
     snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
     FILE *f = fopen(ugid_file, "w");
