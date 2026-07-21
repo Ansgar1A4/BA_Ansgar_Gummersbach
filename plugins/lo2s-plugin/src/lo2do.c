@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 700
+
 #include <stddef.h>
 #include <string.h>
 #include <slurm/spank.h>
@@ -12,14 +14,15 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <ftw.h>
+#include <time.h>
 
 #define FIFO_FILE "/tmp/factory_pipe"
 #define FIFO_RETRY_COUNT 20
 #define FIFO_RETRY_US 100000
 #define MAX_FACTORY_COMMAND_LEN 1536
-#define TRACE_PATH "/data"
+#define DEFAULT_TRACE_PATH "/data"
 #define TRACE_PATH_EDITABLE 1
-
 
 SPANK_PLUGIN(lo2do, 1);
 
@@ -28,58 +31,60 @@ static uint32_t sample_rate = 0;
 static char lo2s_trace_path[256] = "";
 static char lo2s_cgroup_path[256] = "";
 static char lo2s_additional_args[256] = "";
+static char lo2s_deamon_path[256] = "/usr/local/bin/lo2d";
+static char lo2s_info_text[256] = "";
+uid_t target_uid = 0; 
+gid_t target_gid = 0;
 
+// CALLBACKS:
 
-
+// callback executed when the lo2do option is set
 int _lo2do_cb(int val, const char *optarg, int remote) {
     if (remote) {
         lo2do_is_set = 1;
         if (TRACE_PATH_EDITABLE && optarg && strcmp(optarg, "(null)") != 0) {
             snprintf(lo2s_trace_path, sizeof(lo2s_trace_path), "%s", optarg);
         }else{
-            snprintf(lo2s_trace_path, sizeof(lo2s_trace_path), "%s", TRACE_PATH);
+            snprintf(lo2s_trace_path, sizeof(lo2s_trace_path), "%s", DEFAULT_TRACE_PATH);
         }
     }
     return 0;
 }
-
+// callback executed when the lo2do_args option is set
 int _lo2do_args_cb(int val, const char *optarg, int remote) {
     if (remote) {
-        nprintf(lo2s_additional_args, sizeof(lo2s_additional_args), "%s", optarg);
-
+        snprintf(lo2s_additional_args, sizeof(lo2s_additional_args), "%s", optarg);
     }
     return 0;
 }
 
+// OPTION TABLE:
+
 struct spank_option all_spank_options[] = {
     {
-        "lo2do", "TRACE_PATH", 
-        "Enable lo2s System-Monitoring for given job per node, writing generated otf2-traces to given TRACE_PATH",
+        "lo2do", 
+        TRACE_PATH_EDITABLE ? "TRACE_PATH": NULL, 
+        lo2s_info_text,
         TRACE_PATH_EDITABLE ? 2 : 0, 0, _lo2do_cb
     },
     {
         "lo2do_args", "ARGUMENTS",
-        "Pass additional arguments to the lo2s monitoring process",
+        "Pass additional arguments to the lo2s monitoring process, find optional arguments in the lo2s documentation, man-page or at: https://github.com/tud-zih-energy/lo2s/blob/master/man/lo2s.1.pod",
         1, 0, _lo2do_args_cb
     },
     SPANK_OPTIONS_TABLE_END
 };
 
+// HELPER FUNCTIONS:
+
+// Declaring helpfunctions, see defintions below
 int init_lo2d(uint32_t job_id);
 int close_lo2sd(uint32_t job_id);
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path, const char *additional_args);
 static int send_factory_command(uint32_t job_id, const char *payload);
-static int send_factory_exit(uint32_t job_id);
 
-void write_log(const char *log_str) {
-    FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
-    if (log_file != NULL) {
-        fprintf(log_file, "%s", log_str);
-        fflush(log_file);
-        fclose(log_file);
-    }
-}
 
+// Helpfunction to debug plugin functinality
 void write_logf(const char *format, ...) {
     FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
     if (log_file == NULL) return;
@@ -91,42 +96,69 @@ void write_logf(const char *format, ...) {
     fclose(log_file);
 }
 
+// SPANK HOOKS
+
+// Hook used to register the plugin-options
 int slurm_spank_init(spank_t sp, int ac, char **av) {
+    // Set Information text for the lo2do option based on whether TRACE_PATH is editable or not
+    if (TRACE_PATH_EDITABLE) {
+        snprintf(lo2s_info_text, sizeof(lo2s_info_text), "lo2do: Enable lo2s System-Monitoring for given job per node, writing generated lo2s-trace-direcotries to given TRACE_PATH, or to %s if TRACE_PATH is not specified.", DEFAULT_TRACE_PATH);
+    } else {
+        snprintf(lo2s_info_text, sizeof(lo2s_info_text), "lo2do: Enable lo2s System-Monitoring for given job per node, writing generated lo2s-trace-direcotries to %s.", DEFAULT_TRACE_PATH);
+    }
+    // Register the options with SPANK in REMOTE and ALLOCATOR contexts
     spank_option_register(sp, &all_spank_options[0]);
     spank_option_register(sp, &all_spank_options[1]);
     return 0;
 }
 
-
+// Hook used to start the lo2s daemon for the job, which will listen for commands from the spank plugin
 int slurm_spank_job_prolog(spank_t sp, int ac, char **av) {
     uint32_t job_id = 0;
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) return 1;
     return init_lo2d(job_id);
-;
 }
 
-
+// Hook used to start the lo2s monitoring process for the job, which will be started right after the cgroups had been set up by slurm
 int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
+    // Ensuring that this hook is only executed in the REMOTE context
     if (spank_context() != S_CTX_REMOTE) {
         return 0;
     }
-    if (!lo2do_is_set) {
-        write_log("[SPANK] lo2do nicht aktiviert, überspringe Task-Post-Fork.\n");
-        // TODO: close daemon
-
-        return 0;
-    }
     
-    uint32_t job_id = 0;
+    
     uint32_t step_id = 0; 
-    int node_id = 0;
-    spank_get_item(sp, S_JOB_NODEID, &node_id);
-    spank_get_item(sp, S_JOB_ID, &job_id);
     spank_get_item(sp, S_JOB_STEPID, &step_id);
  
+    // Only execute the monitoring process initialization for the first step of the job
+    // MIND: If this functionality would be used after fork, ensure that the monitoring is just started for the first task. (e.g.: slurm_spank_task_init_privileged)
+    if (step_id != 0) return 0;
 
-    if (step_id != 0)return 0; 
+    uint32_t node_id = 0;
+    uint32_t job_id = 0;
+    uid_t uid = 0;
+    gid_t gid = 0;
+    uint32_t node_count = 0;
+
     
+    spank_get_item(sp, S_JOB_NODEID, &node_id);
+    spank_get_item(sp, S_JOB_ID, &job_id);
+    spank_get_item(sp, S_JOB_UID, &uid);
+    spank_get_item(sp, S_JOB_GID, &gid);
+    spank_get_item(sp, S_JOB_NNODES, &node_count);
+    
+    // Check if the lo2do option was set, if not, skip the monitoring process initialization and close the lo2s daemon
+    if (!lo2do_is_set) {
+        write_logf("[SPANK] lo2do nicht aktiviert, überspringe Task-Post-Fork.\n");
+        close_lo2sd(job_id);
+        return 0;
+    }
+
+    char ugid_file[256] = "";
+    snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
+    FILE *f = fopen(ugid_file, "w");
+    if (f) { fprintf(f, "%d:%d:%s:%d", uid, gid, lo2s_trace_path, node_count); fclose(f); }
+
     char final_trace_path[512];
     char job_cgroup_path[512];
     snprintf(final_trace_path, sizeof(final_trace_path), "%s/lo2s_trace_%u_%d", lo2s_trace_path, job_id, node_id);
@@ -137,16 +169,35 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
     return init_monitoring_process(job_id, final_trace_path, job_cgroup_path, additional_args);
 }
 
+int change_owner_callback(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) {
+    (void)sb;
+    (void)typeflag;
+    (void)ftwbuf;
+    return lchown(fpath, target_uid, target_gid);
+}
+
 
 int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
     uint32_t job_id = 0;
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) return 1;
     int ret = close_lo2sd(job_id);
-    return ret;
+    if (ret != 0) return 0;
+    char ugid_file[256] = "";
+    snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
+
+    char trace_path[256] = "";
+    uint32_t node_count = 0;
+    scanf(ugid_file, "%d:%d:%s:%d", &target_uid, &target_gid, trace_path, &node_count);
+    
+    for (int i = 0; i < node_count; i++)
+    {
+        char node_trace_path[512];
+        snprintf(node_trace_path, sizeof(node_trace_path), "%s/lo2s_trace_%u_%d", trace_path, job_id, i);
+        nftw(node_trace_path, change_owner_callback, 20, FTW_PHYS);
+    }
+    
+    return 0;
 }
-
-
-
 
 
 int init_lo2d(uint32_t job_id) {
@@ -167,7 +218,7 @@ int init_lo2d(uint32_t job_id) {
         char job_id_str[32];
         snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
         
-        char *args[] = {"/usr/local/bin/lo2d", job_id_str, NULL};
+        char *args[] = {lo2s_deamon_path, job_id_str, NULL};
         execvp(args[0], args);
         exit(1);
     } else { 
@@ -189,7 +240,8 @@ static int send_factory_command(uint32_t job_id, const char *payload) {
             break;
         }
         if (errno == ENXIO || errno == ENOENT) {
-            usleep(FIFO_RETRY_US);
+            struct timespec retry_delay = {0, FIFO_RETRY_US * 1000};
+            nanosleep(&retry_delay, NULL);
             continue;
         }
         write_logf("[SPANK][CMD] open(%s) failed: %s\n", pipe_path, strerror(errno));
@@ -197,7 +249,7 @@ static int send_factory_command(uint32_t job_id, const char *payload) {
     }
     if (fifo_fd < 0) {
         write_logf("[SPANK][CMD] open(%s) failed after retries: %s\n", pipe_path, strerror(errno));
-        return -1;
+        return -2;
     }
 
     ssize_t len = strlen(payload);
@@ -216,10 +268,6 @@ static int send_factory_command(uint32_t job_id, const char *payload) {
     return 0;
 }
 
-static int send_factory_exit(uint32_t job_id) {
-    return send_factory_command(job_id, "exit_lo2s");
-}
-
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path, const char *additional_args) {
     char payload[MAX_FACTORY_COMMAND_LEN];
     if (additional_args && additional_args[0] != '\0') {
@@ -231,6 +279,6 @@ int init_monitoring_process(uint32_t job_id, const char *trace_path, const char 
 }
 
 int close_lo2sd(uint32_t job_id) {
-    return send_factory_exit(job_id);
+    return send_factory_command(job_id, "exit_lo2s");
 }
 

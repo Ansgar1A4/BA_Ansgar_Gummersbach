@@ -50,14 +50,6 @@ int main(int argc, char *argv[]) {
     char pipe_path[128];
     job_id = atoi(argv[1]);
     snprintf(pipe_path, sizeof(pipe_path), "%s%d", FIFO_FILE, job_id);
-
-        
-    // FIX: Sicherer getenv-Vergleich verhindert Segfault!
-    char *env_val = getenv("LO2S_is_set");
-    if (env_val != NULL && strcmp(env_val, "true") == 0) {
-        return 0; 
-    }
-    setenv("LO2S_is_set", "true", 1);
     
     char buffer[BUFFER_SIZE];
     int fifo_fd;
@@ -116,16 +108,15 @@ int main(int argc, char *argv[]) {
 
             buffer[strcspn(buffer, "\n")] = 0; // Newline entfernen
             if (strlen(buffer) == 0) continue;
-            
+            log_lo2d("[LO2D] received command: %s, pid: %d\n", buffer, current_lo2s_pid);
             // EXIT BEFEHL VERARBEITEN
             if (strcmp(buffer, "exit_lo2s") == 0) {
                 // PID aus Datei lesen
-                char pid_file[256] = "";
-                snprintf(pid_file, sizeof(pid_file), "/tmp/lo2s_pid_%d", job_id);
-                FILE *f = fopen(pid_file, "r");
-                if (f) {
-                    fscanf(f, "%d", &current_lo2s_pid);
-                    fclose(f);
+                // Close procedure if lo2s process has not been started
+                if (current_lo2s_pid < 0) {
+                    fclose(fifo_stream); 
+                    unlink(pipe_path);
+                    exit(0);
                 }
                 
                 if (current_lo2s_pid > 0) {
@@ -166,10 +157,6 @@ int main(int argc, char *argv[]) {
                 unlink(pipe_path);
                 exit(0);
             }
-
-            if(getenv("LO2S_TRACE") != NULL) continue;
-            setenv("LO2S_TRACE", "true", 1);
-
 
             // TRACE STARTEN (FORK)
             pid_t pid = fork();
@@ -248,10 +235,6 @@ int main(int argc, char *argv[]) {
             } else { 
                 // Elternprozess-Teil
                 current_lo2s_pid = pid;
-                char pid_file[256] = "";
-                snprintf(pid_file, sizeof(pid_file), "/tmp/lo2s_pid_%d", job_id);
-                FILE *f = fopen(pid_file, "w");
-                if (f) { fprintf(f, "%d", pid); fclose(f); }
             }
             
         }
