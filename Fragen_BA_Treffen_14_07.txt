@@ -1,0 +1,18 @@
+Welche Benchmarks benutzten
+Frage zu Umfang (Texte ausführlicher, mehr Grundlagen?)
+Frage zu Quellen (Ursprüngliche Quellen nutzen?)
+Nutzungsempfehlungen erstellen, otf2 dateien auslesen und dann in txt-Datei, oder guid zur interpretierung von vampir-Ausgabe
+Kann ich die cgroup schon geschlossen haben, während lo2s die traces flusht
+PIPE-Besitzrechte auf Nutzer setzen
+Wie lese/interpretiere ich die traces in Vampir
+
+
+
+
+
+
+EInlesen:
+-perf-events
+- lo2s -> flush vorgang am ende
+
+

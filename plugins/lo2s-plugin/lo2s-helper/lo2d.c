@@ -11,7 +11,9 @@
 #include <errno.h>
 #include <stdarg.h>
 
-#define FIFO_FILE "/tmp/factory_pipe"
+#define FIFO_FILE "/tmp/lo2d_pipe"
+// TODO: Make this configurable 
+#define LO2S_PATH "/usr/local/bin/lo2s"
 #define BUFFER_SIZE 256
 #define DELIMITER ";"
 
@@ -20,7 +22,7 @@ pid_t current_lo2s_pid = -1;
 volatile sig_atomic_t lo2s_exited = 0;
 
 static void log_lo2d(const char *format, ...) {
-    FILE *log_file = fopen("/tmp/spank_prolog.log", "a");
+    FILE *log_file = fopen("/tmp/spank_lo2do.log", "a");
     if (!log_file) return;
     va_list ap;
     va_start(ap, format);
@@ -71,13 +73,6 @@ int main(int argc, char *argv[]) {
     if (mkfifo(pipe_path, 0600) < 0) {
         perror("mkfifo fehlgeschlagen");
         exit(1);
-    }
-
-    // Signal-Log für den Start des Daemons
-    FILE* log_file = fopen("/tmp/spank_prolog.log", "a");
-    if (log_file != NULL) {
-        fprintf(log_file, "in factory2 (Dauerdienst bereit)\n");
-        fclose(log_file);
     }
 
     while (1) {
@@ -201,8 +196,6 @@ int main(int argc, char *argv[]) {
                     pclose(fp);
                 }
 
-                log_file = fopen("/tmp/spank_prolog.log", "a");
-
                 if (strlen(found_path) == 0) {
                     fprintf(stderr, "[FATAL] Cgroup für Job %d nirgends gefunden!\n", job_id);
                     exit(1);
@@ -212,7 +205,7 @@ int main(int argc, char *argv[]) {
                 // Direkt ausführen ohne den Bash-Umweg, da wir die Umgebung jetzt via task_exit sichern
                 char *args[32];
                 int arg_i = 0;
-                args[arg_i++] = "/usr/local/bin/lo2s";
+                args[arg_i++] = LO2S_PATH;
                 args[arg_i++] = "-o";
                 args[arg_i++] = trace_path;
                 args[arg_i++] = "-aS";
