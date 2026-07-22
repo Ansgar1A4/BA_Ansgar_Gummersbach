@@ -30,13 +30,27 @@
 SPANK_PLUGIN(lo2do, 1);
 
 static uint8_t lo2do_is_set = 0;
-static uint32_t sample_rate = 0;
 static char lo2s_trace_path[256] = "";
 static char lo2s_cgroup_path[256] = "";
 static char lo2s_additional_args[256] = "";
+
 static char lo2s_info_text[256] = "";
 uid_t target_uid = 0; 
 gid_t target_gid = 0;
+
+
+// Helpfunction to debug plugin functinality
+void write_logf(const char *format, ...) {
+    FILE *log_file = fopen("/tmp/spank_lo2do.log", "a");
+    if (log_file == NULL) return;
+    va_list ap;
+    va_start(ap, format);
+    vfprintf(log_file, format, ap);
+    va_end(ap);
+    fflush(log_file);
+    fclose(log_file);
+}
+
 
 // CALLBACKS:
 
@@ -84,18 +98,6 @@ struct spank_option all_spank_options[] = {
 int init_lo2d(uint32_t job_id);
 int close_lo2sd(uint32_t job_id);
 int init_monitoring_process(uint32_t job_id, const char *trace_path, const char *cgroup_path, const char *additional_args);
-
-// Helpfunction to debug plugin functinality
-void write_logf(const char *format, ...) {
-    FILE *log_file = fopen("/tmp/spank_lo2do.log", "a");
-    if (log_file == NULL) return;
-    va_list ap;
-    va_start(ap, format);
-    vfprintf(log_file, format, ap);
-    va_end(ap);
-    fflush(log_file);
-    fclose(log_file);
-}
 
 // SPANK HOOKS
 
@@ -161,6 +163,7 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
 
     char final_trace_path[512];
     snprintf(final_trace_path, sizeof(final_trace_path), "%s/lo2s_trace_%u_%d", lo2s_trace_path, job_id, node_id);
+
     char ugid_file[256] = "";
     snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
     FILE *f = fopen(ugid_file, "w");
