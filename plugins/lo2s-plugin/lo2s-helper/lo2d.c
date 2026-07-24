@@ -1,3 +1,6 @@
+#define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
+
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,9 +14,10 @@
 #include <errno.h>
 #include <stdarg.h>
 
-#define FIFO_FILE "/tmp/lo2d_pipe"
 // TODO: Make this configurable 
+#define FIFO_FILE "/tmp/lo2d_pipe"
 #define LO2S_PATH "/usr/local/bin/lo2s"
+
 #define BUFFER_SIZE 256
 #define DELIMITER ";"
 
@@ -76,8 +80,9 @@ int main(int argc, char *argv[]) {
     }
 
     while (1) {
-        // 1. Blockierend öffnen: Wartet effizient bis ein Writer vorhanden ist.
+        // 1. Blockierend öffnen
         fifo_fd = open(pipe_path, O_RDONLY | O_CLOEXEC);
+        log_lo2d("Found something");
         if (fifo_fd < 0) {
             if (errno == EINTR) {
                 if (lo2s_exited) {
@@ -108,12 +113,6 @@ int main(int argc, char *argv[]) {
             if (strcmp(buffer, "exit_lo2s") == 0) {
                 // PID aus Datei lesen
                 // Close procedure if lo2s process has not been started
-                if (current_lo2s_pid < 0) {
-                    fclose(fifo_stream); 
-                    unlink(pipe_path);
-                    exit(0);
-                }
-                
                 if (current_lo2s_pid > 0) {
                     log_lo2d("[LO2D] stop: found lo2s pgid=%d\n", current_lo2s_pid);
                     if (kill(-current_lo2s_pid, 0) == 0) {
@@ -151,6 +150,7 @@ int main(int argc, char *argv[]) {
                 fclose(fifo_stream); 
                 unlink(pipe_path);
                 exit(0);
+                
             }
 
             // TRACE STARTEN (FORK)
@@ -171,7 +171,7 @@ int main(int argc, char *argv[]) {
                 char *extra_args = strtok(NULL, DELIMITER);
                 
                 if (trace_path == NULL) {
-                    exit(1);
+                    _exit(1);
                 }
 
                 // KEIN clearenv()! Wir erweitern nur das bestehende Environment
@@ -185,7 +185,9 @@ int main(int argc, char *argv[]) {
                 // Suche nach der Cgroup
                 char found_path[512] = {0};
                 char cmd[256];
-                snprintf(cmd, sizeof(cmd), "/usr/bin/find /sys/fs/cgroup -name 'job_%d' | head -n 5", job_id);
+                snprintf(cmd, sizeof(cmd), "/usr/bin/find /sys/fs/cgroup -name 'job_%d' | head -n 1", job_id);
+
+                //TODO: clearenv + set lo2s as path-envar
 
                 FILE *fp = popen(cmd, "r");
                 if (fp) {
@@ -198,11 +200,10 @@ int main(int argc, char *argv[]) {
 
                 if (strlen(found_path) == 0) {
                     fprintf(stderr, "[FATAL] Cgroup für Job %d nirgends gefunden!\n", job_id);
-                    exit(1);
+                    _exit(1);
                 }
                 
                 //snprintf(found_path, sizeof(found_path), "/sys/fs/cgroup/system.slice/slurmstepd.scope/job_%d");
-                // Direkt ausführen ohne den Bash-Umweg, da wir die Umgebung jetzt via task_exit sichern
                 char *args[32];
                 int arg_i = 0;
                 args[arg_i++] = LO2S_PATH;
@@ -223,8 +224,9 @@ int main(int argc, char *argv[]) {
 
                 if (execvp(args[0], args) < 0) {
                     perror("execvp fehlgeschlagen");
-                    exit(1);
+                    _exit(1);
                 }
+                // TODO: exit 0     ???????
             } else { 
                 // Elternprozess-Teil
                 current_lo2s_pid = pid;
