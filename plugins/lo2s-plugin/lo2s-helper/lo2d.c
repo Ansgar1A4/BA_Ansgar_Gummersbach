@@ -36,17 +36,78 @@ static void log_lo2d(const char *format, ...) {
     fclose(log_file);
 }
 
-static void handle_sigchld(int sig) {
-    (void)sig;
+static void reap_any_children(pid_t target_pid, int *saw_target) {
     int saved_errno = errno;
     while (1) {
-        pid_t pid = waitpid(-1, NULL, WNOHANG);
+        int status = 0;
+        pid_t pid = waitpid(-1, &status, WNOHANG);
         if (pid <= 0) break;
+        if (target_pid > 0 && pid == target_pid) {
+            *saw_target = 1;
+        }
         if (pid == current_lo2s_pid) {
             lo2s_exited = 1;
+            current_lo2s_pid = -1;
         }
     }
     errno = saved_errno;
+}
+
+static int wait_for_child_exit(pid_t pid, int timeout_ms) {
+    int elapsed_ms = 0;
+    while (elapsed_ms < timeout_ms) {
+        int status = 0;
+        pid_t waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid) {
+            log_lo2d("[KILL]: 1\n");
+            return 1;
+        }
+        if (waited < 0 && errno != EINTR && errno != ECHILD) {
+            break;
+        }
+        if (kill(pid, 0) != 0) {
+            log_lo2d("[KILL]: 2\n");
+            return 1;
+        }
+        log_lo2d("WAIT\n");
+        usleep(100000);
+        elapsed_ms += 100;
+    }
+    return 0;
+}
+
+static int stop_child_process(pid_t pid) {
+    if (pid <= 0) {
+        return 1;
+    }
+
+    if (kill(-pid, 0) != 0) {
+        return 1;
+    }
+
+    log_lo2d("[LO2D] stop: sending SIGINT to lo2s pid=%d\n", pid);
+    if (kill(-pid, SIGINT) != 0) {
+        log_lo2d("[LO2D] stop: failed to send SIGINT to lo2s pid=%d: %s\n", pid, strerror(errno));
+        return 0;
+    }
+
+    if (wait_for_child_exit(pid, 300000)) {
+        usleep(1000000);
+        log_lo2d("[LO2D] stop: lo2s pid=%d exited cleanly after SIGINT\n", pid);
+        return 1;
+    }
+
+    log_lo2d("[LO2D] stop: lo2s pid=%d did not exit after SIGINT, leaving it running\n", pid);
+    return 0;
+}
+
+static void handle_sigchld(int sig) {
+    (void)sig;
+    int saw_target = 0;
+    reap_any_children(current_lo2s_pid, &saw_target);
+    if (saw_target) {
+        lo2s_exited = 1;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -80,6 +141,9 @@ int main(int argc, char *argv[]) {
     }
 
     while (1) {
+        int dummy_saw_target = 0;
+        reap_any_children(-1, &dummy_saw_target);
+
         // 1. Blockierend öffnen
         fifo_fd = open(pipe_path, O_RDONLY | O_CLOEXEC);
         log_lo2d("Found something");
@@ -116,35 +180,17 @@ int main(int argc, char *argv[]) {
                 if (current_lo2s_pid > 0) {
                     log_lo2d("[LO2D] stop: found lo2s pgid=%d\n", current_lo2s_pid);
                     if (kill(-current_lo2s_pid, 0) == 0) {
-                        int wait_checks = 0;
-                        int wait_max = 20;
-                        while (wait_checks < wait_max && kill(current_lo2s_pid, 0) == 0) {
-                            usleep(100000);
-                            wait_checks++;
-                        }
                         if (kill(current_lo2s_pid, 0) != 0) {
-                            log_lo2d("[LO2D] stop: lo2s already exited after %d checks\n", wait_checks);
+                            log_lo2d("[LO2D] stop: lo2s already exited\n");
                         } else {
-                            if (kill(-current_lo2s_pid, SIGINT) == 0) {
-                                log_lo2d("[LO2D] stop: sent SIGINT to pgid=%d\n", current_lo2s_pid);
-                            } else {
-                                log_lo2d("[LO2D] stop: failed to send SIGINT to pgid=%d: %s\n", current_lo2s_pid, strerror(errno));
-                            }
-                            for (int i = 0; i < 20; i++) {
-                                if (kill(current_lo2s_pid, 0) == -1) {
-                                    log_lo2d("[LO2D] stop: lo2s exited after %d checks\n", i + 1);
-                                    break;
-                                }
-                                usleep(500000);
-                            }
-                            if (kill(current_lo2s_pid, 0) == 0) {
-                                log_lo2d("[LO2D] stop: lo2s still alive after timeout, sending SIGKILL pgid=%d\n", current_lo2s_pid);
-                                kill(-current_lo2s_pid, SIGKILL);
-                            }
+                            stop_child_process(current_lo2s_pid);
                         }
                     } else {
                         log_lo2d("[LO2D] stop: lo2s pgid=%d not alive\n", current_lo2s_pid);
                     }
+                    //reap_any_children(-1, &dummy_saw_target);
+                    current_lo2s_pid = -1;
+                    lo2s_exited = 0;
                     sync(); 
                 }
                 fclose(fifo_stream); 
@@ -226,10 +272,10 @@ int main(int argc, char *argv[]) {
                     perror("execvp fehlgeschlagen");
                     _exit(1);
                 }
-                // TODO: exit 0     ???????
             } else { 
                 // Elternprozess-Teil
                 current_lo2s_pid = pid;
+                lo2s_exited = 0;
             }
             
         }

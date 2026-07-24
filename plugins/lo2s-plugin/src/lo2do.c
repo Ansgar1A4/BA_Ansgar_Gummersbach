@@ -223,26 +223,34 @@ int init_lo2d(uint32_t job_id) {
     pid_t pid1 = fork();
     if (pid1 < 0) return -1;
 
-    if (pid1 == 0) { 
+    if (pid1 == 0) {
+        signal(SIGCHLD, SIG_DFL);
+        signal(SIGHUP, SIG_IGN);
+
         pid_t pid2 = fork();
-        if (pid2 < 0) exit(1);
-        if (pid2 > 0) exit(0);
-        if (setsid() < 0) exit(1); 
-        
+        if (pid2 < 0) _exit(1);
+        if (pid2 > 0) _exit(0);
+        if (setsid() < 0) _exit(1);
+
         char log_path[256];
         snprintf(log_path, sizeof(log_path), "/tmp/lo2s_debug_%d.log", job_id);
         freopen(log_path, "a", stdout);
         freopen(log_path, "a", stderr);
-                
+
         char job_id_str[32];
         snprintf(job_id_str, sizeof(job_id_str), "%u", job_id);
-        
+
         char *args[] = {DAEMON_PATH, job_id_str, NULL};
         execvp(args[0], args);
-        exit(1);
-    } else { 
-        int status;
-        waitpid(pid1, &status, 0); 
+        _exit(1);
+    } else {
+        int status = 0;
+        while (waitpid(pid1, &status, 0) < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
     }
     return 0;
 }
