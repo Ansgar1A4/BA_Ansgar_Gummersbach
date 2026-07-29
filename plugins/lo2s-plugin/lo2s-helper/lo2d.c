@@ -57,9 +57,11 @@ static int wait_for_child_exit(pid_t pid, int timeout_ms) {
     int elapsed_ms = 0;
     while (elapsed_ms < timeout_ms) {
         int status = 0;
+        
+        log_lo2d("Waited\n");
         pid_t waited = waitpid(pid, &status, WNOHANG);
         if (waited == pid) {
-            log_lo2d("[KILL]: 1\n");
+            log_lo2d("[KILL]: 1, %d\n", status);
             return 1;
         }
         if (waited < 0 && errno != EINTR && errno != ECHILD) {
@@ -71,6 +73,7 @@ static int wait_for_child_exit(pid_t pid, int timeout_ms) {
         }
         log_lo2d("WAIT\n");
         usleep(100000);
+        
         elapsed_ms += 100;
     }
     return 0;
@@ -81,7 +84,7 @@ static int stop_child_process(pid_t pid) {
         return 1;
     }
 
-    if (kill(-pid, 0) != 0) {
+    if (kill(pid, 0) != 0) {
         return 1;
     }
 
@@ -91,8 +94,9 @@ static int stop_child_process(pid_t pid) {
         return 0;
     }
 
+    log_lo2d("AFTER\n");
+
     if (wait_for_child_exit(pid, 300000)) {
-        usleep(1000000);
         log_lo2d("[LO2D] stop: lo2s pid=%d exited cleanly after SIGINT\n", pid);
         return 1;
     }
@@ -142,7 +146,7 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         int dummy_saw_target = 0;
-        reap_any_children(-1, &dummy_saw_target);
+        //reap_any_children(-1, &dummy_saw_target);
 
         // 1. Blockierend öffnen
         fifo_fd = open(pipe_path, O_RDONLY | O_CLOEXEC);
@@ -179,7 +183,7 @@ int main(int argc, char *argv[]) {
                 // Close procedure if lo2s process has not been started
                 if (current_lo2s_pid > 0) {
                     log_lo2d("[LO2D] stop: found lo2s pgid=%d\n", current_lo2s_pid);
-                    if (kill(-current_lo2s_pid, 0) == 0) {
+                    if (kill(current_lo2s_pid, 0) == 0) {
                         if (kill(current_lo2s_pid, 0) != 0) {
                             log_lo2d("[LO2D] stop: lo2s already exited\n");
                         } else {
@@ -195,7 +199,7 @@ int main(int argc, char *argv[]) {
                 }
                 fclose(fifo_stream); 
                 unlink(pipe_path);
-                exit(0);
+                _exit(0);
                 
             }
 
@@ -225,8 +229,8 @@ int main(int argc, char *argv[]) {
                 setenv("PATH", "/usr/bin:/usr/local/bin:/usr/sbin:/sbin", 1);
 
                 // Fehler-Logs wieder aktivieren!
-                freopen("/tmp/lo2s_error.log", "a", stderr);
-                freopen("/tmp/lo2s_output.log", "a", stdout);
+                freopen("/tmp/spank_lo2do.log", "a", stderr);
+                freopen("/tmp/spank_lo2do.log", "a", stdout);
 
                 // Suche nach der Cgroup
                 char found_path[512] = {0};
