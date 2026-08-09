@@ -46,7 +46,7 @@ FMPI_INC =
 #---------------------------------------------------------------------------
 # Global *compile time* flags for Fortran programs
 #---------------------------------------------------------------------------
-FFLAGS	= -O3 -fallow-argument-mismatch
+FFLAGS	= -O3 -fallow-argument-mismatch -g
 
 #---------------------------------------------------------------------------
 # Global *link time* flags. Flags for increasing maximum executable 
@@ -92,7 +92,7 @@ CMPI_INC =
 #---------------------------------------------------------------------------
 # Global *compile time* flags for C programs
 #---------------------------------------------------------------------------
-CFLAGS	= -O3
+CFLAGS	= -O3 -g
 
 #---------------------------------------------------------------------------
 # Global *link time* flags. Flags for increasing maximum executable 

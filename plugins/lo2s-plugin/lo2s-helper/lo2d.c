@@ -58,7 +58,6 @@ static int wait_for_child_exit(pid_t pid, int timeout_ms) {
     while (elapsed_ms < timeout_ms) {
         int status = 0;
         
-        log_lo2d("Waited\n");
         pid_t waited = waitpid(pid, &status, WNOHANG);
         if (waited == pid) {
             log_lo2d("[KILL]: 1, %d\n", status);
@@ -71,7 +70,6 @@ static int wait_for_child_exit(pid_t pid, int timeout_ms) {
             log_lo2d("[KILL]: 2\n");
             return 1;
         }
-        log_lo2d("WAIT\n");
         usleep(100000);
         
         elapsed_ms += 100;
@@ -238,7 +236,7 @@ int main(int argc, char *argv[]) {
                 snprintf(cmd, sizeof(cmd), "/usr/bin/find /sys/fs/cgroup -name 'job_%d' | head -n 1", job_id);
 
                 //TODO: clearenv + set lo2s as path-envar
-
+                
                 FILE *fp = popen(cmd, "r");
                 if (fp) {
                     if (fgets(found_path, sizeof(found_path), fp) != NULL) {
@@ -257,12 +255,6 @@ int main(int argc, char *argv[]) {
                 char *args[32];
                 int arg_i = 0;
                 args[arg_i++] = LO2S_PATH;
-                args[arg_i++] = "-o";
-                args[arg_i++] = trace_path;
-                args[arg_i++] = "-aS";
-                args[arg_i++] = "--cgroup";
-                args[arg_i++] = found_path;
-
                 if (extra_args != NULL && strlen(extra_args) > 0) {
                     char *opt = strtok(extra_args, " ");
                     while (opt != NULL && arg_i < (int)(sizeof(args)/sizeof(args[0]) - 1)) {
@@ -270,8 +262,19 @@ int main(int argc, char *argv[]) {
                         opt = strtok(NULL, " ");
                     }
                 }
+                args[arg_i++] = "-o";
+                args[arg_i++] = trace_path;
+                args[arg_i++] = "-AS";
+                args[arg_i++] = "--cgroup";
+                args[arg_i++] = found_path;
+                args[arg_i++] = "--dwarf";
+                args[arg_i++] = "full";
+                args[arg_i++] = "-g";
+
                 args[arg_i] = NULL;
 
+
+                setenv("DEBUGINFOD_URLS", "https://rockylinux.org", 1);
                 if (execvp(args[0], args) < 0) {
                     perror("execvp fehlgeschlagen");
                     _exit(1);

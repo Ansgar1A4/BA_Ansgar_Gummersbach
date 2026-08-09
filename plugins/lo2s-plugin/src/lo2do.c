@@ -1,5 +1,5 @@
 #define _XOPEN_SOURCE 700
-
+#define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <string.h>
 #include <slurm/spank.h>
@@ -17,14 +17,11 @@
 #include <ftw.h>
 #include <time.h>
 #include <stdbool.h>
-#include <poll.h>
-#include <sys/syscall.h>
 
 
 #define FIFO_RETRY_COUNT 20
 #define FIFO_RETRY_US 100000
 #define MAX_FACTORY_COMMAND_LEN 1536
-#define DAEMON_PID_FILE "/tmp/daemon_pid"
 
 // TODO: Configurable Arguments
 #define DEFAULT_TRACE_PATH "/data"              //required
@@ -209,7 +206,7 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
     uint32_t job_id = 0;
     if (spank_get_item(sp, S_JOB_ID, &job_id) != ESPANK_SUCCESS) return 1;
     if (close_lo2sd(job_id) == -2) return 0;
-    //usleep(10000000);
+    usleep(10000000);
     char ugid_file[256] = "";
     snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
 
@@ -226,7 +223,6 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
 }
 
 
-
 int init_lo2d(uint32_t job_id) {
     pid_t pid1 = fork();
     if (pid1 < 0) return -1;
@@ -234,15 +230,7 @@ int init_lo2d(uint32_t job_id) {
     if (pid1 == 0) { 
         pid_t pid2 = fork();
         if (pid2 < 0) exit(1);
-        if (pid2 > 0) {
-            char pid_file[256] = "";
-            snprintf(pid_file, sizeof(pid_file),"%s%u", DAEMON_PID_FILE, job_id);
-            FILE *f = fopen(pid_file, "w");
-            if (f) { fprintf(f, "%d", pid2); fclose(f); }
-            else return -100;
-            exit(0);
-        }
-        
+        if (pid2 > 0) exit(0);
         if (setsid() < 0) exit(1); 
         
         char log_path[256];
@@ -315,25 +303,7 @@ int init_monitoring_process(uint32_t job_id, const char *trace_path, const char 
     return _send_daemon_command(job_id, payload);
 }
 
-int pidfd_open(pid_t pid, unsigned int flags) {
-    return syscall(SYS_pidfd_open, pid, flags);
-}
-
 int close_lo2sd(uint32_t job_id) {
-    // READ_PID
-    pid_t d_pid = 0;
-    char pid_file[256] = "";
-    snprintf(pid_file, sizeof(pid_file),"%s%u", DAEMON_PID_FILE, job_id);
-    scanf(pid_file, "%d", d_pid);
-    unlink(pid_file);
-    // WAIT for process PID
-    int ret = _send_daemon_command(job_id, "exit_lo2s");
-    int pidfd = pidfd_open(d_pid, 0);
-    if (pidfd >= 0) {
-        struct pollfd pfd = { .fd = pidfd, .events = POLLIN };        
-        poll(&pfd, 1, -1); 
-        close(pidfd);
-    }
-    return ret;
+    return _send_daemon_command(job_id, "exit_lo2s");
 }
 

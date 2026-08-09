@@ -6,7 +6,7 @@ export PLUGIN_DIR=/opt/lo2s-plugin
 export PLUGSTACK_CONFIG=/usr/lib64/slurm/plugstack.conf
 export PLUGIN_NAME=lo2do
 worker_name=slurm-cpu-worker-
-worker_count=4
+worker_count=1
 
 cd ../../
 ./update_slurmfiles.sh
@@ -18,14 +18,14 @@ cd ..
 docker exec slurmctld mkdir -p "${PLUGIN_DIR}"
 docker cp "$(pwd)/plugstack.conf" slurmctld:"${PLUGSTACK_CONFIG}"
 
-for n in {1..4}; do
+for n in {1..1}; do
     docker exec ${worker_name}${n} mkdir -p "${PLUGIN_DIR}"
     docker cp "$(pwd)/plugstack.conf" ${worker_name}${n}:"${PLUGSTACK_CONFIG}"
 done
 
 echo "Ensure PlugStackConfig is enabled in slurm.conf..."
 docker exec slurmctld bash -lc "if grep -q '^PlugStackConfig' /etc/slurm/slurm.conf; then sed -i 's|^#*PlugStackConfig.*|PlugStackConfig=/usr/lib64/slurm/plugstack.conf|' /etc/slurm/slurm.conf; else echo 'PlugStackConfig=/usr/lib64/slurm/plugstack.conf' >> /etc/slurm/slurm.conf; fi"
-for n in {1..4}; do
+for n in {1..1}; do
     docker exec ${worker_name}${n} bash -lc "if grep -q '^PlugStackConfig' /etc/slurm/slurm.conf; then sed -i 's|^#*PlugStackConfig.*|PlugStackConfig=/usr/lib64/slurm/plugstack.conf|' /etc/slurm/slurm.conf; else echo 'PlugStackConfig=/usr/lib64/slurm/plugstack.conf' >> /etc/slurm/slurm.conf; fi"
 done
 
