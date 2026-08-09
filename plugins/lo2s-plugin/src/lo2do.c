@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <ftw.h>
+#include <limits.h>
 #include <time.h>
 #include <stdbool.h>
 
@@ -170,7 +171,7 @@ int slurm_spank_init_post_opt(spank_t sp, int ac, char **av) {
     char ugid_file[256] = "";
     snprintf(ugid_file, sizeof(ugid_file), "/tmp/lo2s_ugid_%d", job_id);
     FILE *f = fopen(ugid_file, "w");
-    if (f) { fprintf(f, "%s", lo2s_trace_path); fclose(f); }
+    if (f) { fprintf(f, "%s", final_trace_path); fclose(f); }
 
     // cgroup_path is not used anymore, as we search for the cgroup path in the lo2s-helper process
     // TODO: Cleanup cgroup_path usage in the future, as it is not needed anymore
@@ -189,12 +190,14 @@ int change_owner_callback(const char *fpath, const struct stat *sb, int typeflag
     (void)ftwbuf;
 
     if (lchown(fpath, target_uid, target_gid) != 0) {
-        return -1; 
+        write_logf("[SPANK] Failed lchown on %s: %s\n", fpath, strerror(errno));
+        return 0;
     }
 
     if (typeflag != FTW_SL && typeflag != FTW_SLN) {
         if (chmod(fpath, 0700) != 0) {
-            return -1;
+            write_logf("[SPANK] Failed chmod on %s: %s\n", fpath, strerror(errno));
+            return 0;
         }
     }
 
@@ -213,12 +216,27 @@ int slurm_spank_job_epilog(spank_t sp, int ac, char **av) {
     char node_trace_path[256] = "";
     spank_get_item(sp, S_JOB_UID, &target_uid);
     spank_get_item(sp, S_JOB_GID, &target_gid);
-    scanf(ugid_file, "%s", node_trace_path);
+
+    FILE *f = fopen(ugid_file, "r");
+    if (f == NULL) {
+        write_logf("[SPANK] Failed to open ugid_file %s for Job %u: %s\n", ugid_file, job_id, strerror(errno));
+        return 1;
+    }
+    if (fscanf(f, "%255s", node_trace_path) != 1) {
+        write_logf("[SPANK] Failed to read trace path from %s for Job %u\n", ugid_file, job_id);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+
     // delete the ugid_file after reading it
     if (unlink(ugid_file) != 0) {
         write_logf("[SPANK] Failed to delete ugid_file for Job %u: %s\n", job_id, strerror(errno));
     }
-    nftw(node_trace_path, change_owner_callback, 20, FTW_PHYS);    
+
+    if (nftw(node_trace_path, change_owner_callback, 20, FTW_PHYS | FTW_DEPTH) != 0) {
+        write_logf("[SPANK] nftw failed on %s for Job %u: %s\n", node_trace_path, job_id, strerror(errno));
+    }
     return 0;
 }
 
