@@ -72,8 +72,7 @@ archive/
 !README*md
 
 
-saved_traces/
 vampir_views/
-global_traces/
+*_traces/
 dir_overhead_c8_n1/
 new_trace_stuff/

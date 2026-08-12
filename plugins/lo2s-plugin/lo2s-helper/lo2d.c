@@ -92,7 +92,6 @@ static int stop_child_process(pid_t pid) {
         return 0;
     }
 
-    log_lo2d("AFTER\n");
 
     if (wait_for_child_exit(pid, 300000)) {
         log_lo2d("[LO2D] stop: lo2s pid=%d exited cleanly after SIGINT\n", pid);

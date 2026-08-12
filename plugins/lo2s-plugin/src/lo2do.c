@@ -266,6 +266,8 @@ int init_lo2d(uint32_t job_id) {
         int status;
         waitpid(pid1, &status, 0); 
     }
+    // BUGFIX: Wait till lo2s started
+    // TODO: Ask for a better solution, maybe a signal from lo2d to the spank plugin
     return 0;
 }
 
@@ -318,7 +320,9 @@ int init_monitoring_process(uint32_t job_id, const char *trace_path, const char 
     } else {
         snprintf(payload, sizeof(payload), "%s;%s", trace_path, cgroup_path);
     }
-    return _send_daemon_command(job_id, payload);
+    int ret = _send_daemon_command(job_id, payload);
+    sleep(2);
+    return ret;
 }
 
 int close_lo2sd(uint32_t job_id) {
