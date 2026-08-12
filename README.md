@@ -1,3 +1,8 @@
+Dieses Projekt nutzt das slurm docker cluster als Test Umgebung, README.md dessen folgend:
+
+
+
+
 # Slurm Docker Cluster
 
 **Slurm Docker Cluster** is a multi-container Slurm cluster designed for rapid
