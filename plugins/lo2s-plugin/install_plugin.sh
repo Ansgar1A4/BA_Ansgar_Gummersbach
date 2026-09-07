@@ -1,5 +1,8 @@
 # Install SPANK-Plugin
 
+bin_dir=/bin
+lib_dir=/usr/lib64/
+
 cd /tmp
 wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/src/lo2do.c
 
