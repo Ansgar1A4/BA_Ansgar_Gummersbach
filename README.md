@@ -1,7 +1,45 @@
+
+# Plugin - Installation
+
+## Use on all compute nodes:
+
+```
+wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_daemon.sh
+wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_plugin.sh
+
+chmod +x install_daemon.sh
+chmod +x install_plugin.sh
+
+# may start with sudo
+./install_daemon.sh
+./install_plugin.sh
+
+rm -rf install_daemon.sh install_plugin.sh
+```
+
+## Use on Controller
+```
+wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_plugin.sh
+
+chmod +x install_plugin.sh
+
+# may start with sudo
+./install_plugin.sh
+
+rm -rf install_plugin.sh
+```
+
+## Start Plugin
+
+```
+scontrol reconfigure
+```
+
+
+
+
+
 Dieses Projekt nutzt das slurm docker cluster als Test Umgebung, README.md dessen folgend:
-
-
-
 
 # Slurm Docker Cluster
 
