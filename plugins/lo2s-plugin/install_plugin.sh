@@ -12,4 +12,6 @@ rm -f lo2do.c
 
 # Add Plugin to plugstack.conf:
 touch /etc/slurm/plugstack.conf
-echo "required   $lib_dir/lo2do.so" >> /etc/slurm/plugstack.conf
+
+#TODO: Check if line already exists in plugstack.conf, if not add it
+echo "required   $lib_dir/lo2do.so" > /etc/slurm/plugstack.conf
