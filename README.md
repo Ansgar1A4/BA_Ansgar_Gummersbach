@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 # Plugin - Installation
 
@@ -40,6 +41,9 @@ scontrol reconfigure
 
 
 Dieses Projekt nutzt das slurm docker cluster als Test Umgebung, README.md dessen folgend:
+=======
+Dieses Projekt nutzt das slurm docker cluster (https://github.com/giovtorres/slurm-docker-cluster) als Test Umgebung, README.md dessen folgend:
+>>>>>>> upstream/Abgabe
 
 # Slurm Docker Cluster
 
