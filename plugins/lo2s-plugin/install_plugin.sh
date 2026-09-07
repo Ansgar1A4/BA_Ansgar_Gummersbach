@@ -1,8 +1,10 @@
 # Install SPANK-Plugin
 
+cd /tmp
 wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/src/lo2do.c
 
 gcc -shared -fPIC -I/usr/include/slurm -o $lib_dir/lo2do.so lo2do.c
+cd /tmp
 rm -f lo2do.c
 
 # Add Plugin to plugstack.conf:

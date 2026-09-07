@@ -5,6 +5,8 @@ lib_dir=/usr/lib64/
 
 # Get lo2s running
 
+cd /tmp
+
 ## otf2-library (if needed)
 wget https://perftools.pages.jsc.fz-juelich.de/cicd/otf2/tags/otf2-3.1/otf2-3.1.tar.gz 
 tar -xzf otf2-3.1.tar.gz 
@@ -13,6 +15,8 @@ cd otf2-3.1
 make -j$(nproc) && make install
 cp /usr/local/lib/libotf2.so* $lib_dir
 ldconfig
+
+cd /tmp
 rm -rf otf2-3.1 otf2-3.1.tar.gz
 
 ## Build lo2s
@@ -36,7 +40,7 @@ make -j$(nproc)
 
 ### Cleanup
 
-cd ..
+cd /tmp
 rm -rf lo2s lo2s-build
 
 
