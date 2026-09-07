@@ -5,6 +5,8 @@
 ## Use on all compute nodes:
 
 ```
+cd /tmp
+
 wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_daemon.sh
 wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_plugin.sh
 
@@ -20,6 +22,8 @@ rm -rf install_daemon.sh install_plugin.sh
 
 ## Use on Controller
 ```
+cd /tmp
+
 wget https://raw.githubusercontent.com/Ansgar1A4/BA_Ansgar_Gummersbach/Abgabe/plugins/lo2s-plugin/install_plugin.sh
 
 chmod +x install_plugin.sh
